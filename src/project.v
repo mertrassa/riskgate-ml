@@ -3,8 +3,10 @@
  *               anomaly detector, for Tiny Tapeout.
  *
  * Every order is checked by five hard rules (kill switch, fat-finger price
- * band, order size, position limit, order-rate throttle) and, in parallel,
- * scored by a depth-3 decision tree trained offline in Python (see ../ml).
+ * band, order size, position limit, order-rate throttle) and scored by a
+ * depth-3 decision tree trained offline in Python (see ../ml).  The tree is
+ * walked one level per clock; the decision is committed 4 clocks (160 ns at
+ * 25 MHz) after the SUBMIT write.
  * The ML layer can only ADD rejections - it can never approve an order that
  * breaks a hard rule.
  *
@@ -80,68 +82,55 @@ module tt_um_riskgate_ml (
   wire we_cmd    = wr && (addr == A_CMD);
 
   // ------------------------------------------------------------------
-  // Configuration / staging registers
+  // Configuration / staging registers, held in latches.
+  // A latch is open while its register is written (the one-clock WR pulse,
+  // during which the host holds ADDR/DATA stable) and while in reset, when it
+  // loads its reset value.  rst_hold switches the data back to the bus one
+  // clock AFTER reset releases, so the latches close on the reset value.
   // ------------------------------------------------------------------
-  reg [4:0] ctrl;
-  reg [7:0] price, qty, ref_price, band, max_qty, pos_lim, rate_max, rate_win;
-  reg [3:0] tb_shift;
-  reg [2:0] node_ptr;
-  reg [7:0] leaves;
-  reg       side_r;
+  reg rst_hold;
+  always @(posedge clk) rst_hold <= ~rst_n;
 
-  always @(posedge clk) begin
-    if (!rst_n) begin
-      ctrl      <= 5'b0;
-      price     <= 8'd100;
-      qty       <= 8'd0;
-      ref_price <= 8'd100;
-      band      <= 8'd255;
-      max_qty   <= 8'd255;
-      pos_lim   <= 8'd255;
-      rate_max  <= 8'd255;
-      rate_win  <= 8'd255;
-      tb_shift  <= 4'd10;
-      node_ptr  <= 3'd0;
-      leaves    <= 8'd0;
-      side_r    <= 1'b0;
-    end else if (wr) begin
-      case (addr)
-        A_CTRL:     ctrl      <= data[4:0];
-        A_PRICE:    price     <= data;
-        A_QTY:      qty       <= data;
-        A_SUBMIT:   side_r    <= data[0];
-        A_REF:      ref_price <= data;
-        A_BAND:     band      <= data;
-        A_MAXQTY:   max_qty   <= data;
-        A_POSLIM:   pos_lim   <= data;
-        A_RATEMAX:  rate_max  <= data;
-        A_RATEWIN:  rate_win  <= data;
-        A_TIMEBASE: tb_shift  <= data[3:0];
-        A_NODESEL:  node_ptr  <= data[6:4];
-        A_LEAVES:   leaves    <= data;
-        A_SIDE:     side_r    <= data[0];
-        default: ;
-      endcase
-    end
-  end
+  wire        in_rst = ~rst_n;
+  wire [15:0] wsel   = wr ? (16'd1 << addr) : 16'd0;
+  wire  [7:0] d_00   = rst_hold ? 8'd0   : data;
+  wire  [7:0] d_ff   = rst_hold ? 8'd255 : data;
+  wire  [7:0] d_100  = rst_hold ? 8'd100 : data;
+  wire  [7:0] d_10   = rst_hold ? 8'd10  : data;
+
+  wire [4:0] ctrl;
+  wire [7:0] price, qty, ref_price, band, max_qty, pos_lim, rate_max, rate_win;
+  wire [3:0] tb_shift;
+  wire [2:0] node_ptr;
+  wire [7:0] leaves;
+  wire       side_r;
+
+  rg_latch #(5) l_ctrl  (.en(in_rst | wsel[A_CTRL]),     .d(d_00[4:0]), .q(ctrl));
+  rg_latch #(8) l_price (.en(in_rst | wsel[A_PRICE]),    .d(d_100),     .q(price));
+  rg_latch #(8) l_qty   (.en(in_rst | wsel[A_QTY]),      .d(d_00),      .q(qty));
+  rg_latch #(1) l_side  (.en(in_rst | wsel[A_SUBMIT] | wsel[A_SIDE]), .d(d_00[0]), .q(side_r));
+  rg_latch #(8) l_ref   (.en(in_rst | wsel[A_REF]),      .d(d_100),     .q(ref_price));
+  rg_latch #(8) l_band  (.en(in_rst | wsel[A_BAND]),     .d(d_ff),      .q(band));
+  rg_latch #(8) l_maxq  (.en(in_rst | wsel[A_MAXQTY]),   .d(d_ff),      .q(max_qty));
+  rg_latch #(8) l_posl  (.en(in_rst | wsel[A_POSLIM]),   .d(d_ff),      .q(pos_lim));
+  rg_latch #(8) l_rmax  (.en(in_rst | wsel[A_RATEMAX]),  .d(d_ff),      .q(rate_max));
+  rg_latch #(8) l_rwin  (.en(in_rst | wsel[A_RATEWIN]),  .d(d_ff),      .q(rate_win));
+  rg_latch #(4) l_tb    (.en(in_rst | wsel[A_TIMEBASE]), .d(d_10[3:0]), .q(tb_shift));
+  rg_latch #(3) l_nptr  (.en(in_rst | wsel[A_NODESEL]),  .d(d_00[6:4]), .q(node_ptr));
+  rg_latch #(8) l_leaf  (.en(in_rst | wsel[A_LEAVES]),   .d(d_00),      .q(leaves));
 
   // Decision-tree nodes: node i = nodes[11*i +: 11] = {feature[2:0], threshold[7:0]}
   // Reset value (feature 0, threshold 255) always branches left.
-  reg [76:0] nodes;
-  integer i;
-  always @(posedge clk) begin
-    if (!rst_n) begin
-      for (i = 0; i < 7; i = i + 1)
-        nodes[11*i +: 11] <= {3'd0, 8'd255};
-    end else begin
-      for (i = 0; i < 7; i = i + 1) begin
-        if (wr && addr == A_NODESEL && data[6:4] == i)
-          nodes[11*i+8 +: 3] <= data[2:0];
-        if (wr && addr == A_NODETHR && node_ptr == i)
-          nodes[11*i +: 8] <= data;
-      end
+  wire [76:0] nodes;
+  genvar gi;
+  generate
+    for (gi = 0; gi < 7; gi = gi + 1) begin : g_node
+      rg_latch #(3) l_feat (.en(in_rst | (wsel[A_NODESEL] & (data[6:4] == gi))),
+                            .d(d_00[2:0]), .q(nodes[11*gi+8 +: 3]));
+      rg_latch #(8) l_thr  (.en(in_rst | (wsel[A_NODETHR] & (node_ptr == gi))),
+                            .d(d_ff),      .q(nodes[11*gi +: 8]));
     end
-  end
+  endgenerate
 
   // ------------------------------------------------------------------
   // Time base: auto ticks every 2^tb_shift cycles, or manual ticks via CMD
@@ -155,7 +144,12 @@ module tt_um_riskgate_ml (
                        &presc[6:0],  &presc[5:0],  &presc[4:0],  &presc[3:0],
                        &presc[2:0],  &presc[1:0],  presc[0],     1'b1};
   wire        tick_auto = carry[tb_shift];
-  wire        tick      = (tick_auto & ~ctrl[4]) | (we_cmd & data[2]);
+  wire        tick_raw  = (tick_auto & ~ctrl[4]) | (we_cmd & data[2]);
+  // While the tree is walked (3 clocks) the features must not move: a tick
+  // arriving then is held in tick_pend and applied right after.
+  wire        frozen;
+  reg         tick_pend;
+  wire        tick      = (tick_raw | tick_pend) & ~frozen;
   wire        clr_pos   = we_cmd & data[0];
   wire        clr_win   = we_cmd & data[1];
   wire        clr_stat  = we_cmd & data[3];
@@ -176,7 +170,7 @@ module tt_um_riskgate_ml (
   // ------------------------------------------------------------------
   // Feature extraction (combinational, for the staged order)
   // ------------------------------------------------------------------
-  wire        side_eff = we_submit ? data[0] : side_r;
+  wire        side_eff = side_r;
   wire  [8:0] pdiff = {1'b0, price} - {1'b0, ref_price};
   wire  [7:0] f0    = pdiff[8] ? (8'd0 - pdiff[7:0]) : pdiff[7:0];
   wire  [7:0] f1 = qty;
@@ -204,20 +198,58 @@ module tt_um_riskgate_ml (
   wire rules_fail = kill_fail | price_fail | size_fail | pos_fail | rate_fail;
 
   // ------------------------------------------------------------------
-  // ML layer: depth-3 decision tree
+  // ML layer: depth-3 decision tree, walked one level per clock.
+  // ev[0..2]: compare at depth 0..2; ev[3]: commit the decision.
   // ------------------------------------------------------------------
-  wire [2:0] leaf;
-  wire       leaf_label;
-  rg_tree u_tree (
+  reg  [3:0] ev;
+  reg  [2:0] idx;    // heap index of the node being compared
+  reg  [2:0] path;   // branch bits so far = leaf index when done
+  assign frozen = |ev[2:0];
+  wire       commit = ev[3];
+
+  reg [10:0] nsel;
+  always @(*) begin
+    case (idx)
+      3'd0:    nsel = nodes[0*11 +: 11];
+      3'd1:    nsel = nodes[1*11 +: 11];
+      3'd2:    nsel = nodes[2*11 +: 11];
+      3'd3:    nsel = nodes[3*11 +: 11];
+      3'd4:    nsel = nodes[4*11 +: 11];
+      3'd5:    nsel = nodes[5*11 +: 11];
+      default: nsel = nodes[6*11 +: 11];
+    endcase
+  end
+
+  wire go_right;
+  rg_tree_step u_tree (
       .feats  ({f5, f4, f3, f2, f1, f0}),
-      .nodes  (nodes),
-      .leaves (leaves),
-      .leaf   (leaf),
-      .label  (leaf_label)
+      .node   (nsel),
+      .right  (go_right)
   );
+
+  always @(posedge clk) begin
+    if (!rst_n) begin
+      ev        <= 4'd0;
+      idx       <= 3'd0;
+      path      <= 3'd0;
+      tick_pend <= 1'b0;
+    end else begin
+      ev        <= {ev[2:0], we_submit};
+      tick_pend <= frozen & (tick_raw | tick_pend);
+      if (we_submit)
+        idx <= 3'd0;
+      else if (frozen) begin
+        idx  <= {idx[1:0], 1'b0} + 3'd1 + {2'b00, go_right};
+        path <= {path[1:0], go_right};
+      end
+    end
+  end
+
+  wire [2:0] leaf       = path;
+  wire       leaf_label = leaves[path];
   wire ml_hit     = ctrl[1] & leaf_label;   // reported even in shadow mode
   wire reject     = rules_fail | (ml_hit & ctrl[2]);
-  wire accept_now = we_submit & ~reject;
+  wire accept_now = commit & ~reject;
 
   wire win_wrap = tick && (win_ticks == rate_win);
 
@@ -236,14 +268,14 @@ module tt_um_riskgate_ml (
     end else begin
       presc <= presc + 15'd1;
 
-      if (we_submit)
+      if (commit)
         idle <= 8'd0;
       else if (tick && idle != 8'd255)
         idle <= idle + 8'd1;
 
       if (clr_win)
         streak <= 8'd0;
-      else if (we_submit) begin
+      else if (commit) begin
         streak    <= f5;
         last_side <= side_eff;
       end
@@ -256,8 +288,8 @@ module tt_um_riskgate_ml (
           win_ticks <= win_wrap ? 8'd0 : win_ticks + 8'd1;
         // counts every order attempt (message-rate throttle), saturating
         if (win_wrap)
-          win_count <= we_submit ? 8'd1 : 8'd0;
-        else if (we_submit && win_count != 8'd255)
+          win_count <= commit ? 8'd1 : 8'd0;
+        else if (commit && win_count != 8'd255)
           win_count <= win_count + 8'd1;
       end
 
@@ -270,7 +302,7 @@ module tt_um_riskgate_ml (
         decided <= 1'b0;
         status  <= 8'd0;
         leaf_r  <= 3'd0;
-      end else if (we_submit) begin
+      end else if (commit) begin
         decided <= 1'b1;
         status  <= {~status[7], ~reject, ml_hit, rate_fail,
                     pos_fail, size_fail, price_fail, kill_fail};
