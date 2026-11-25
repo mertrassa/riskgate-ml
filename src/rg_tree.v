@@ -47,8 +47,11 @@ module rg_latch #(
     output reg  [W-1:0] q
 );
 
+  // Intentional latch: tell Verilator's lint so.
+  /* verilator lint_off LATCH */
   always @(*) begin
     if (en) q = d;
   end
+  /* verilator lint_on LATCH */
 
 endmodule

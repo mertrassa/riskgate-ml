@@ -96,7 +96,7 @@ module tt_um_riskgate_ml (
   wire  [7:0] d_00   = rst_hold ? 8'd0   : data;
   wire  [7:0] d_ff   = rst_hold ? 8'd255 : data;
   wire  [7:0] d_100  = rst_hold ? 8'd100 : data;
-  wire  [7:0] d_10   = rst_hold ? 8'd10  : data;
+  wire  [3:0] d_10   = rst_hold ? 4'd10  : data[3:0];
 
   wire [4:0] ctrl;
   wire [7:0] price, qty, ref_price, band, max_qty, pos_lim, rate_max, rate_win;
@@ -115,7 +115,7 @@ module tt_um_riskgate_ml (
   rg_latch #(8) l_posl  (.en(in_rst | wsel[A_POSLIM]),   .d(d_ff),      .q(pos_lim));
   rg_latch #(8) l_rmax  (.en(in_rst | wsel[A_RATEMAX]),  .d(d_ff),      .q(rate_max));
   rg_latch #(8) l_rwin  (.en(in_rst | wsel[A_RATEWIN]),  .d(d_ff),      .q(rate_win));
-  rg_latch #(4) l_tb    (.en(in_rst | wsel[A_TIMEBASE]), .d(d_10[3:0]), .q(tb_shift));
+  rg_latch #(4) l_tb    (.en(in_rst | wsel[A_TIMEBASE]), .d(d_10)     , .q(tb_shift));
   rg_latch #(3) l_nptr  (.en(in_rst | wsel[A_NODESEL]),  .d(d_00[6:4]), .q(node_ptr));
   rg_latch #(8) l_leaf  (.en(in_rst | wsel[A_LEAVES]),   .d(d_00),      .q(leaves));
 
