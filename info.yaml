@@ -1,7 +1,7 @@
 # Tiny Tapeout project information
 project:
   title:        "RiskGate-ML: Pre-Trade Risk Gateway with On-Chip ML"
-  author:       "Your Name"         # TODO
+  author:       "Mert Rassa"
   discord:      ""                  # Your discord username (optional)
   description:  "Blocks dangerous trading orders in hardware: 5 hard risk rules plus a decision-tree anomaly detector trained in Python"
   language:     "Verilog"
