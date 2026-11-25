@@ -1,0 +1,52 @@
+{
+  "config": {
+    "ref": 128,
+    "band": 20,
+    "max_qty": 200,
+    "pos_lim": 125,
+    "rate_max": 12,
+    "rate_win": 49,
+    "ml_en": false,
+    "ml_enforce": false,
+    "kill": false
+  },
+  "feature_names": [
+    "price_dev",
+    "qty",
+    "pos_after_8",
+    "win_count",
+    "idle_ticks",
+    "side_streak"
+  ],
+  "nodes": [
+    {
+      "feature": 5,
+      "threshold": 5
+    },
+    {
+      "feature": 4,
+      "threshold": 1
+    },
+    {
+      "feature": 4,
+      "threshold": 2
+    },
+    {
+      "feature": 1,
+      "threshold": 5
+    },
+    {
+      "feature": 0,
+      "threshold": 10
+    },
+    {
+      "feature": 1,
+      "threshold": 19
+    },
+    {
+      "feature": 0,
+      "threshold": 8
+    }
+  ],
+  "leaves_mask": 169
+}

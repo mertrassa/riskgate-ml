@@ -1,0 +1,47 @@
+Chip tree (globally optimal, optimal_tree.py):
+side_streak <= 5?  yes:
+    idle_ticks <= 1?  yes:
+        qty <= 5?  yes:
+            -> ANOMALY (leaf 0)
+        qty >  5:
+            -> normal (leaf 1)
+    idle_ticks >  1:
+        price_dev <= 10?  yes:
+            -> normal (leaf 2)
+        price_dev >  10:
+            -> ANOMALY (leaf 3)
+side_streak >  5:
+    idle_ticks <= 2?  yes:
+        qty <= 19?  yes:
+            -> normal (leaf 4)
+        qty >  19:
+            -> ANOMALY (leaf 5)
+    idle_ticks >  2:
+        price_dev <= 8?  yes:
+            -> normal (leaf 6)
+        price_dev >  8:
+            -> ANOMALY (leaf 7)
+
+chip heap nodes (feature, threshold): [(5, 5), (4, 1), (4, 2), (1, 5), (0, 10), (1, 19), (0, 8)]
+leaves mask: 0xA9
+
+Baseline CART tree (scikit-learn):
+|--- qty <= 5.50
+|   |--- idle_ticks <= 1.50
+|   |   |--- side_streak <= 2.50
+|   |   |   |--- class: 1
+|   |   |--- side_streak >  2.50
+|   |   |   |--- class: 1
+|   |--- idle_ticks >  1.50
+|   |   |--- class: 0
+|--- qty >  5.50
+|   |--- side_streak <= 6.50
+|   |   |--- price_dev <= 10.50
+|   |   |   |--- class: 0
+|   |   |--- price_dev >  10.50
+|   |   |   |--- class: 1
+|   |--- side_streak >  6.50
+|   |   |--- idle_ticks <= 5.50
+|   |   |   |--- class: 1
+|   |   |--- idle_ticks >  5.50
+|   |   |   |--- class: 0

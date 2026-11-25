@@ -1,0 +1,65 @@
+{
+  "cart_hyperparameters": {
+    "criterion": "gini",
+    "min_samples_leaf": 10,
+    "anomaly_class_weight": 2
+  },
+  "optimal_tree": {
+    "caught": 1055.0,
+    "false_blocks": 81.0,
+    "budget": 81.798,
+    "lambda": 0.6272387394631336,
+    "upper_bound": 1055.5005365140917,
+    "gap": 0.5005365140916638,
+    "splits": 123,
+    "cells": 14633
+  },
+  "opt_budget": 0.006,
+  "cart_caught_train_val": 1021,
+  "test_sessions": 12,
+  "rules_only": {
+    "normal_false_block_rate": 0.021447721179624665,
+    "normal_ml_only_block_rate": 0.0,
+    "anomaly_block_rate": 0.43796711509715996,
+    "per_scenario_block_rate": {
+      "fat_finger": 0.2857142857142857,
+      "momentum": 0.23684210526315788,
+      "normal": 0.021447721179624665,
+      "runaway": 0.46598639455782315,
+      "stuffing": 0.5060728744939271
+    },
+    "mean_orders_leaked_before_first_block": 7.5,
+    "anomalous_orders_caught_only_by_ml": 0,
+    "episodes": 38
+  },
+  "rules_plus_cart": {
+    "normal_false_block_rate": 0.022043491212392016,
+    "normal_ml_only_block_rate": 0.0077450104259755735,
+    "anomaly_block_rate": 0.85949177877429,
+    "per_scenario_block_rate": {
+      "fat_finger": 0.7142857142857143,
+      "momentum": 0.7105263157894737,
+      "normal": 0.022043491212392016,
+      "runaway": 0.8061224489795918,
+      "stuffing": 1.0
+    },
+    "mean_orders_leaked_before_first_block": 2.4210526315789473,
+    "anomalous_orders_caught_only_by_ml": 318,
+    "episodes": 38
+  },
+  "rules_plus_ml": {
+    "normal_false_block_rate": 0.022043491212392016,
+    "normal_ml_only_block_rate": 0.00804289544235925,
+    "anomaly_block_rate": 0.8759342301943199,
+    "per_scenario_block_rate": {
+      "fat_finger": 0.7142857142857143,
+      "momentum": 0.7105263157894737,
+      "normal": 0.022043491212392016,
+      "runaway": 0.8435374149659864,
+      "stuffing": 1.0
+    },
+    "mean_orders_leaked_before_first_block": 2.1578947368421053,
+    "anomalous_orders_caught_only_by_ml": 329,
+    "episodes": 38
+  }
+}
