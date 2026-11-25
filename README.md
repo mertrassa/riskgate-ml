@@ -1,9 +1,14 @@
 # RiskGate-ML
 
 **A pre-trade risk gateway on a chip: hard risk rules plus a machine-learning anomaly detector,
-deciding every order in a single clock cycle (40 ns at 25 MHz).**
+deciding every order in 4 clock cycles (160 ns at 25 MHz).**
 
 Built for [Tiny Tapeout](https://tinytapeout.com) (one 1×1 tile, sky130).
+
+![gds](../../workflows/gds/badge.svg) ![test](../../workflows/test/badge.svg) ![docs](../../workflows/docs/badge.svg)
+
+**Layout status:** fits one tile at 83% utilisation; timing met with ≥17 ns slack at 25 MHz in every
+corner; DRC, LVS and antenna clean; all tests pass on the gate-level netlist.
 
 ## The problem
 
@@ -153,16 +158,23 @@ cd ml; python generate_data.py; python train.py
 Simulation (Linux or WSL, needs iverilog and cocotb):
 
 ```bash
-cd test && make -B          # 13 tests, including the full held-out session replay
+cd test && make -B          # 14 tests, including the full held-out session replay
 ```
 
 ## Submitting to Tiny Tapeout
 
-1. Create a repo from the Tiny Tapeout Verilog template for your shuttle (GitHub → *Use this
-   template*), then copy these files over the template's files.
-2. Rename `tt_um_riskgate_ml` to something unique, such as `tt_um_<github-username>_riskgate`, in
-   `info.yaml`, `src/project.v`, `test/tb.v` and `demo/riskgate_demo.py`.
-3. Fill in `author` in `info.yaml`, enable GitHub Pages and Actions, then push.
-4. Check the **gds** action: it reports the real cell utilisation and runs the gate-level tests.
-   The design has about 240 flip-flops and should fit one tile. If it doesn't, the easiest cut
-   is 6-bit thresholds; dropping the position feature (unused by the current tree) is another.
+The repo already follows the Tiny Tapeout sky130 template, and its **gds**, **test** and **docs**
+actions pass (layout, precheck, gate-level tests). To submit:
+
+1. Fill in `author` in `info.yaml`.
+2. Sign in at [app.tinytapeout.com](https://app.tinytapeout.com), pick the open shuttle and add
+   this repository to your tile. The app checks that `tt_um_riskgate_ml` is unique on that shuttle.
+
+### How it was made to fit
+
+The first layout needed 118% of the tile. Two changes brought it to 83% without dropping any feature:
+
+- the 162 host-written configuration bits are **latches** (with their reset values kept) instead
+  of flip-flops with hold-value multiplexers, about 15 µm² per bit instead of about 38;
+- the tree is **walked one level per clock** with one feature selector and one comparator,
+  instead of three of each. The decision now commits 4 clocks after SUBMIT instead of 1.

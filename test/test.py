@@ -15,6 +15,7 @@ import sys
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
+from cocotb.utils import get_sim_time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "ml"))
@@ -312,6 +313,22 @@ async def test_auto_timebase(dut):
     await ClockCycles(dut.clk, 200)
     idle = await h.read(R_F0 + 4)
     assert 45 <= idle <= 60, f"idle={idle} after ~210 clocks at 4 clocks/tick"
+
+
+@cocotb.test()
+async def test_ticks_kept_during_tree_walk(dut):
+    """In real-time mode, ticks that land in the 3-clock tree walk must be deferred, not lost."""
+    h = await start(dut)
+    await h.write(A_TIMEBASE, 2)        # tick every 4 clocks, auto mode
+    await h.write(A_CTRL, 0)
+    await h.write(A_CMD, CMD_CLR_WIN)
+    t0 = get_sim_time(unit="ns")
+    for i in range(16):
+        await h.order(i & 1, 100, 1)
+        await ClockCycles(dut.clk, i % 4)   # vary the phase of each walk against the ticks
+    ticks = await h.read(R_WINTICKS)
+    expected = (get_sim_time(unit="ns") - t0) / 40 / 4
+    assert abs(ticks - expected) <= 2, f"{ticks} ticks counted, about {expected:.1f} expected"
 
 
 @cocotb.test()

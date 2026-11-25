@@ -54,7 +54,7 @@ RiskGate-ML is a silicon chip, designed for the Tiny Tapeout programme, that sit
 a bank's trading algorithms and the stock exchange and decides, for every order, whether it
 may go out. It combines five hard risk rules that regulators require with a small
 machine-learning model that catches suspicious orders the rules miss. Each decision takes
-one clock cycle, 40 nanoseconds. On held-out test data, the rules alone block 43.8\% of
+four clock cycles, 160 nanoseconds. On held-out test data, the rules alone block 43.8\% of
 the orders from injected incidents (runaway algorithms, fat-finger errors, price
 manipulation, quote stuffing). With the on-chip model, the chip blocks 87.6\%, while the model
 wrongly blocks only 0.8\% of legitimate orders. The model is the provably best possible
@@ -101,7 +101,7 @@ The project has two halves that meet in one small file (Figure~\ref{fig:big}).
         and finds the best decision tree that fits in the chip. This happens once, before the chip
         is used, and again whenever the model is retrained.
   \item \textbf{Hardware}, in Verilog and manufactured as a chip, applies the rules and the
-        tree to every order, live, in one clock cycle.
+        tree to every order, live, in four clock cycles (160\,ns).
   \item \textbf{The bridge} is the trained tree: 7 yes/no questions and 8 answers. A small
         microcontroller on the Tiny Tapeout demo board loads it into the chip's registers at
         start-up. Because it lives in registers, not in the wiring, it can be retrained after the
@@ -132,7 +132,7 @@ The project has two halves that meet in one small file (Figure~\ref{fig:big}).
   \node[box, text width=19mm, below left=5mm and -19mm of hf] (rules) {5 hard rules};
   \node[hot, text width=19mm, below right=5mm and -19mm of hf] (htree) {Decision tree};
   \node[box, text width=42mm, below=17mm of hf] (dec) {Accept or reject\\\scriptsize + the reason};
-  \node[box, text width=42mm, below=of dec] (out) {Status, LEDs, display\\\scriptsize all in 40 ns};
+  \node[box, text width=42mm, below=of dec] (out) {Status, LEDs, display\\\scriptsize all in 160 ns};
   \draw[arr] (pins) -- (hf);
   \draw[arr] (hf) -- (rules);
   \draw[arr] (hf) -- (htree);
@@ -325,8 +325,9 @@ and one held-out session (307 orders) that the chip tests replay.
 \section{The hardware, step by step}
 
 The chip (\code{src/project.v}, \code{src/rg\_tree.v}) runs on a 25\,MHz clock, one tick every
-40 nanoseconds. Its ``memory'' consists of 239 \emph{flip-flops}, each holding one bit, and its
-``thinking'' consists of about 1{,}600 logic gates wired between them. Figure~\ref{fig:datapath}
+40 nanoseconds. Its ``memory'' is 251 one-bit cells: 162 \emph{latches} that hold the settings and the tree,
+and 89 \emph{flip-flops} that hold the running state. Its ``thinking'' is about 1{,}200 logic
+gates wired between them. The finished layout fills 83\% of one Tiny Tapeout tile. Figure~\ref{fig:datapath}
 shows the path an order takes.
 
 \begin{figure}[h]
@@ -353,10 +354,11 @@ shows the path an order takes.
   \draw[arr, dashed] (state.north) |- node[lab, above, pos=0.62] {feeds the next order} (feat.west);
   \draw[decorate, decoration={brace, amplitude=5pt}, thick, black!50]
         ($(out.east |- feat.north)+(3mm,0)$) -- ($(out.east |- dec.north)+(3mm,0)$)
-        node[midway, right=4pt, lab, text width=15mm] {within one 40\,ns clock cycle};
+        node[midway, right=4pt, lab, text width=15mm] {4 clock cycles (160\,ns)};
 \end{tikzpicture}
-\caption{The chip's datapath. Everything from feature extraction to the decision is plain wiring
-that settles within one clock cycle; the results are stored at the end of that cycle.}
+\caption{The chip's datapath. The features and rules are plain wiring that settles within one
+clock cycle. The tree is walked one level per clock, so the decision is stored 4 clocks (160\,ns)
+after the order is submitted.}
 \label{fig:datapath}
 \end{figure}
 
@@ -394,12 +396,15 @@ kill switch on? price deviation $>$ band? size $= 0$ or $>$ limit? position afte
 window count $\ge$ rate limit? The five work in parallel, side by side.
 
 \step{5}{Ask the tree, one path only}
-A tree has 7 questions, but any one order only meets 3 of them, one per level. So the chip needs
-just 3 comparators instead of 7. The first compares the feature chosen by the root question with
-its threshold. Its yes/no answer drives a \emph{multiplexer} (a digital switch) that selects which
-second-level question to ask, and the second answer selects the third. The three answers together
-form a 3-bit number, the leaf (answer) index, which looks up normal or anomalous in the 8-bit
-answer mask.
+A tree has 7 questions, but any one order only meets 3 of them, one per level. So the chip asks
+them one after another, one per clock tick, with a single \emph{multiplexer} (a digital switch)
+and a single comparator. The multiplexer picks the feature the current question needs, the
+comparator answers it, and the answer picks the next question. After three ticks the three
+answers form a 3-bit number, the leaf (answer) index, which looks up normal or anomalous in the
+8-bit answer mask. The first version asked all three levels at once, with three multiplexers and
+three comparators, and needed 118\% of the tile. Sharing one of each, and storing the settings in
+latches instead of flip-flops, brought it down to 83\%. The cost is three extra clock cycles
+(120\,ns).
 
 \step{6}{Decide}
 \[
@@ -409,7 +414,7 @@ In \emph{shadow mode} (enforcement off), the model's opinion is recorded but not
 This is how a bank tests a new model before trusting it.
 
 \step{7}{Update the state at the clock edge}
-At the end of the cycle, flip-flops capture the results:
+On the fourth clock, flip-flops capture the results:
 \begin{itemize}
   \item a status byte records which rules failed, whether the model flagged the order, and the verdict;
   \item the leaf number is kept, so every decision can be explained;
@@ -436,16 +441,21 @@ and the demo use this mode.
 \begin{itemize}
   \item \textbf{13 automated tests} (cocotb, simulating the actual chip design) cover each rule,
         the kill switch pin, the tree in shadow and enforcing modes, every feature including
-        saturation at 255, the display and LEDs, and the real-time clock.
+        saturation at 255, the display and LEDs, and the real-time clock (including ticks that arrive while the tree is being walked).
   \item \textbf{Full-session replay.} A held-out session of 307 orders over 3{,}001 ticks is
         replayed into the simulated chip and into the Python twin. Every one of the 307 decisions,
         and the leaf behind each one, matches exactly.
-  \item \textbf{Planted bugs.} To check that the tests can actually catch mistakes, seven
+  \item \textbf{Planted bugs.} To check that the tests can actually catch mistakes, nine
         deliberate bugs were planted one at a time (an off-by-one comparison, a wrong streak
-        condition, a missing cap, and so on). The tests caught six. The seventh is a timing
+        condition, a missing cap, a lost clock tick, and so on). The tests caught eight. The ninth is a timing
         coincidence that only occurs in real-time mode, and it is listed as a known gap.
-  \item \textbf{Only the pins.} The tests touch only the chip's pins, so the same tests can run
-        unchanged on the final manufactured netlist in Tiny Tapeout's build.
+  \item \textbf{Only the pins.} The tests touch only the chip's pins, so the same tests run
+        unchanged on the final gate-level netlist (the exact transistors-and-wires version that
+        gets manufactured). All 14 pass there too.
+  \item \textbf{The real layout.} Tiny Tapeout's build turns the design into a physical layout:
+        it fits one tile (83\% full), meets timing with large margin (at least 17\,ns of slack
+        in the 40\,ns cycle, even in the slow, hot corner), and passes every manufacturing check
+        (design rules, layout-versus-schematic, antenna).
 \end{itemize}
 
 % ==================================================================
@@ -507,9 +517,7 @@ in an incident is marked anomalous, but the first few look exactly like normal t
 \begin{itemize}
   \item \textbf{Synthetic data.} The trading data is simulated. The natural next step is to retrain
         on real order-book data. The chip itself would not change.
-  \item \textbf{Not yet verified:} the exact chip area (expected to fit one Tiny Tapeout tile,
-        but close to the limit), the tests on the final manufactured netlist, and the demo on a
-        real board. Tiny Tapeout's GitHub build reports the first two.
+  \item \textbf{Not yet verified:} the demo on a real board, which needs the manufactured chip.
   \item \textbf{Known test gap:} a window reset landing on the same clock cycle as an order, in
         real-time mode only.
   \item \textbf{Solver note:} the decomposition method can miss the true optimum by a few orders
@@ -524,7 +532,8 @@ in an incident is marked anomalous, but the first few look exactly like normal t
   \item[Flip-flop] A circuit that stores one bit and updates it only at a clock beat.
   \item[Comparator] A circuit that tells whether one number is bigger than another.
   \item[Multiplexer] A digital switch that picks one of several inputs.
-  \item[Register] A group of flip-flops holding a number, such as the position limit.
+  \item[Latch] A smaller cousin of the flip-flop: it stores one bit while its ``write'' signal is on.
+  \item[Register] A group of flip-flops or latches holding a number, such as the position limit.
   \item[Synchroniser] Two flip-flops in a row that safely bring an outside signal into the chip's clock.
   \item[Feature] A number describing an order or its context, which the model looks at.
   \item[Decision tree] A chain of yes/no questions on features that ends in an answer.

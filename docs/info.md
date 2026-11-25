@@ -10,7 +10,8 @@ bank's trading system is allowed to send it to an exchange. Regulators require t
 (in Canada, NI 23-103; in the US, SEC Rule 15c3-5). Knight Capital lost $440M in 45 minutes in
 2012 because a malfunctioning algorithm faced no such check.
 
-Each order (side, price, quantity) is evaluated in a single clock cycle by two layers:
+Each order (side, price, quantity) is checked by two layers; the decision is committed 4 clock
+cycles (160 ns at 25 MHz) after the SUBMIT write:
 
 **1. Hard rules (deterministic, always enforced)**
 
@@ -39,7 +40,7 @@ The tree is trained in Python on synthetic order flow that contains realistic fa
 (runaway algorithm, fat-finger near-miss, momentum ignition, quote stuffing). The training finds
 the globally optimal depth-3 tree with 8-bit integer thresholds: the most anomalies caught under
 a fixed false-alarm budget, with a proven bound. The chip evaluates the tree along one
-root-to-leaf path, so it needs only three comparators.
+root-to-leaf path, one level per clock, so it needs a single feature selector and comparator.
 
 The tree's nodes and leaf labels are *registers*, loaded at start-up, so the model can be retrained
 after tape-out. The ML layer can only **add** rejections, never approve an order that broke a
@@ -77,6 +78,13 @@ Reads: put the address on `uio[3:0]`; `uo_out` shows the register (when CTRL.dis
 
 Tree nodes use heap order (children of node n are 2n+1 and 2n+2): go right if feature > threshold.
 Leaf index = the three branch bits, root first.
+
+STATUS and the LEDs update 4 clocks after the SUBMIT write pulse, which is always before the
+host can complete its next write. In real-time mode, a tick that falls during the 3-clock tree walk
+is applied right after it (use TIMEBASE >= 2 so ticks are never closer than that).
+
+The host-written registers are latches (half the area of flip-flops), loaded with their reset
+values while rst_n is low.
 
 Reset defaults: all limits 255 (permissive), REF 100, TIMEBASE 10, ML off, all nodes "always
 left", all leaves normal.
